@@ -39,7 +39,7 @@ def display_analysis(analysis):
 def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     path_condition = path_conditions_and_vars["path_condition"]
     new_path_condition = []
-    log.debug("path_condition = %s" %path_condition)
+    log.info("path_condition = %s" %path_condition)
     for expr in path_condition:
         if not is_expr(expr):
             continue
@@ -73,7 +73,8 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     if not global_params.CHAION:
         solver.add(stack[2] > BitVec('Iv', 256))
     else:
-        solver.add(stack[3] > BitVec('Iv', 128))
+        print("typeof item = ", type(stack[3]))
+        solver.add(stack[3] > BitVec('Iv', 256))
     # if it is not feasible to re-execute the call, its not a bug
     ret_val = not (solver.check() == unsat)
     if global_params.DEBUG_MODE:
@@ -175,10 +176,11 @@ def update_analysis(analysis, opcode, stack, mem, global_state, path_conditions_
     analysis["gas_mem"] = gas_memory
 
     if opcode == "CALL":
-        recipient = stack[1]
         if not global_params.CHAION:
+            recipient = stack[1]
             transfer_amount = stack[2]
         else:
+            recipient = stack[1]-stack[2]
             transfer_amount = stack[3]
         if isReal(transfer_amount) and transfer_amount == 0:
             return

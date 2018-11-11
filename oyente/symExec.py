@@ -1360,11 +1360,19 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                         for item in sha3_list[position]:
                             stack.insert(0, item)
             else:
-                # push into the execution a fresh symbolic variable
-                new_var_name = gen.gen_arbitrary_var()
-                new_var = BitVec(new_var_name, 256)
-                path_conditions_and_vars[new_var_name] = new_var
-                stack.insert(0, new_var)
+                if not global_params.CHAION:
+                    # push into the execution a fresh symbolic variable
+                    new_var_name = gen.gen_arbitrary_var()
+                    new_var = BitVec(new_var_name, 256)
+                    path_conditions_and_vars[new_var_name] = new_var
+                    stack.insert(0, new_var)
+                else:
+                    new_var_name = gen.gen_arbitrary_var()
+                    new_var_high = BitVec(new_var_name, 128)
+                    new_var_name = gen.gen_arbitrary_var()
+                    new_var_low = BitVec(new_var_name, 128)
+                    stack.insert(0, new_var_high)
+                    stack.insert(0, new_var_low)
         else:
             raise ValueError('STACK underflow')
     #
@@ -1419,6 +1427,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     param_idx = (position - 4) // 32
                     for param in params:
                         if param_idx == param['position']:
+                            # dao's mount is from here
                             new_var_name = param['name']
                             g_src_map.var_names.append(new_var_name)
                 else:
@@ -1936,6 +1945,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             # in the paper, it is shaky when the size of data output is
             # min of stack[6] and the | o |
 
+            print("typeof(tx_amount) = ", type(transfer_amount))
             if isReal(transfer_amount):
                 if transfer_amount == 0:
                     stack.insert(0, 1)   # x = 0
