@@ -54,3 +54,6 @@ GENERATE_TEST_CASES = 0
 
 # Run Oyente in parallel
 PARALLEL = 0
+
+# Run Oyente for Chaion
+CHAION = 0

@@ -39,6 +39,7 @@ def display_analysis(analysis):
 def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     path_condition = path_conditions_and_vars["path_condition"]
     new_path_condition = []
+    log.debug("path_condition = %s" %path_condition)
     for expr in path_condition:
         if not is_expr(expr):
             continue
@@ -49,7 +50,10 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
                 pos = get_storage_position(var)
                 if pos in global_state['Ia']:
                     new_path_condition.append(var == global_state['Ia'][pos])
-    transfer_amount = stack[2]
+    if not global_params.CHAION:
+        transfer_amount = stack[2]
+    else:
+        transfer_amount = stack[3]
     if isSymbolic(transfer_amount) and is_storage_var(transfer_amount):
         pos = get_storage_position(transfer_amount)
         if pos in global_state['Ia']:
@@ -57,6 +61,7 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     if global_params.DEBUG_MODE:
         log.info("=>>>>>> New PC: " + str(new_path_condition))
 
+    log.info("new_path_condition = " + str(new_path_condition))
     solver = Solver()
     solver.set("timeout", global_params.TIMEOUT)
     solver.add(path_condition)
@@ -65,7 +70,10 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     # If outgas > 2300 when using call.gas.value then the contract will be considered to contain reentrancy bug
     solver.add(stack[0] > 2300)
     # transfer_amount > deposit_amount => reentrancy
-    solver.add(stack[2] > BitVec('Iv', 256))
+    if not global_params.CHAION:
+        solver.add(stack[2] > BitVec('Iv', 256))
+    else:
+        solver.add(stack[3] > BitVec('Iv', 128))
     # if it is not feasible to re-execute the call, its not a bug
     ret_val = not (solver.check() == unsat)
     if global_params.DEBUG_MODE:
@@ -168,7 +176,10 @@ def update_analysis(analysis, opcode, stack, mem, global_state, path_conditions_
 
     if opcode == "CALL":
         recipient = stack[1]
-        transfer_amount = stack[2]
+        if not global_params.CHAION:
+            transfer_amount = stack[2]
+        else:
+            transfer_amount = stack[3]
         if isReal(transfer_amount) and transfer_amount == 0:
             return
         if isSymbolic(recipient):

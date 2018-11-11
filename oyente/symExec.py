@@ -27,6 +27,10 @@ log = logging.getLogger(__name__)
 
 UNSIGNED_BOUND_NUMBER = 2**256 - 1
 CONSTANT_ONES_159 = BitVecVal((1 << 160) - 1, 256)
+if global_params.CHAION:
+    WORD_SIZE = 128
+else:
+    WORD_SIZE = 256
 
 Assertion = namedtuple('Assertion', ['pc', 'model'])
 Underflow = namedtuple('Underflow', ['pc', 'model'])
@@ -197,7 +201,7 @@ def change_format():
             line = line.replace(':', '')
             lineParts = line.split(' ')
             try: # removing initial zeroes
-                lineParts[0] = str(int(lineParts[0]))
+                lineParts[0] = str(int(lineParts[0], 16))
 
             except:
                 lineParts[0] = lineParts[0]
@@ -220,9 +224,11 @@ def change_format():
 def build_cfg_and_analyze():
     change_format()
     with open(g_disasm_file, 'r') as disasm_file:
-        disasm_file.readline()  # Remove first line
+        disasm_file.readline()  # Remove first line, this line is bytecode
         tokens = tokenize.generate_tokens(disasm_file.readline)
         collect_vertices(tokens)
+        #log.info(g_src_map.instr_positions)
+        print("instructions = ", str(instructions))
         construct_bb()
         construct_static_edges()
         full_sym_exec()  # jump targets are constructed on the fly
@@ -319,6 +325,7 @@ def collect_vertices(tokens):
                     int(ptok_string, 16)
                     push_val += ptok_string
                 except ValueError:
+                    # maybe '>', just pass
                     pass
 
             continue
@@ -381,7 +388,10 @@ def construct_bb():
     global vertices
     global edges
     sorted_addresses = sorted(instructions.keys())
+    print("sorted address: ", sorted_addresses)
     size = len(sorted_addresses)
+    print("end_ins_dict = ", end_ins_dict)
+    print("jump_type = ", jump_type)
     for key in end_ins_dict:
         end_address = end_ins_dict[key]
         block = BasicBlock(key, end_address)
@@ -392,6 +402,7 @@ def construct_bb():
         while i < size and sorted_addresses[i] <= end_address:
             block.add_instruction(instructions[sorted_addresses[i]])
             i += 1
+        log.info("block: " + str(key) + ":instructions = " + str(block.get_instructions()));
         block.set_block_type(jump_type[key])
         vertices[key] = block
         edges[key] = []
@@ -405,6 +416,7 @@ def add_falls_to():
     global vertices
     global edges
     key_list = sorted(jump_type.keys())
+    print("key_list = ", key_list)
     length = len(key_list)
     for i, key in enumerate(key_list):
         if jump_type[key] != "terminal" and jump_type[key] != "unconditional" and i+1 < length:
@@ -446,20 +458,25 @@ def get_init_global_state(path_conditions_and_vars):
     # for some weird reason these 3 vars are stored in path_conditions insteaad of global_state
     else:
         sender_address = BitVec("Is", 256)
+        if global_params.CHAION:
+            sender_addr_high = BitVec("Is-high", 128)
+            sender_addr_low = BitVec("Is-low", 128)
+            recv_addr_high = BitVec("Ia-high", 128)
+            recv_addr_low = BitVec("Is-low", 128)
         receiver_address = BitVec("Ia", 256)
-        deposited_value = BitVec("Iv", 256)
-        init_is = BitVec("init_Is", 256)
-        init_ia = BitVec("init_Ia", 256)
+        deposited_value = BitVec("Iv", WORD_SIZE)
+        init_is = BitVec("init_Is", WORD_SIZE)
+        init_ia = BitVec("init_Ia", WORD_SIZE)
 
     path_conditions_and_vars["Is"] = sender_address
     path_conditions_and_vars["Ia"] = receiver_address
     path_conditions_and_vars["Iv"] = deposited_value
 
-    constraint = (deposited_value >= BitVecVal(0, 256))
+    constraint = (deposited_value >= BitVecVal(0, WORD_SIZE))
     path_conditions_and_vars["path_condition"].append(constraint)
     constraint = (init_is >= deposited_value)
     path_conditions_and_vars["path_condition"].append(constraint)
-    constraint = (init_ia >= BitVecVal(0, 256))
+    constraint = (init_ia >= BitVecVal(0, WORD_SIZE))
     path_conditions_and_vars["path_condition"].append(constraint)
 
     # update the balances of the "caller" and "callee"
@@ -469,7 +486,7 @@ def get_init_global_state(path_conditions_and_vars):
 
     if not gas_price:
         new_var_name = gen.gen_gas_price_var()
-        gas_price = BitVec(new_var_name, 256)
+        gas_price = BitVec(new_var_name, WORD_SIZE)
         path_conditions_and_vars[new_var_name] = gas_price
 
     if not origin:
@@ -484,21 +501,21 @@ def get_init_global_state(path_conditions_and_vars):
 
     if not currentNumber:
         new_var_name = "IH_i"
-        currentNumber = BitVec(new_var_name, 256)
+        currentNumber = BitVec(new_var_name, WORD_SIZE)
         path_conditions_and_vars[new_var_name] = currentNumber
 
     if not currentDifficulty:
         new_var_name = "IH_d"
-        currentDifficulty = BitVec(new_var_name, 256)
+        currentDifficulty = BitVec(new_var_name, WORD_SIZE)
         path_conditions_and_vars[new_var_name] = currentDifficulty
 
     if not currentGasLimit:
         new_var_name = "IH_l"
-        currentGasLimit = BitVec(new_var_name, 256)
+        currentGasLimit = BitVec(new_var_name, WORD_SIZE)
         path_conditions_and_vars[new_var_name] = currentGasLimit
 
     new_var_name = "IH_s"
-    currentTimestamp = BitVec(new_var_name, 256)
+    currentTimestamp = BitVec(new_var_name, WORD_SIZE)
     path_conditions_and_vars[new_var_name] = currentTimestamp
 
     # the state of the current current contract
@@ -507,6 +524,11 @@ def get_init_global_state(path_conditions_and_vars):
     global_state["miu_i"] = 0
     global_state["value"] = deposited_value
     global_state["sender_address"] = sender_address
+    if global_params.CHAION:
+        global_state["sender_addr_high"] = sender_addr_high
+        global_state["sender_addr_low"] = sender_addr_low
+        global_state["recv_addr_high"] = recv_addr_high
+        global_state["recv_addr_low"] = recv_addr_low
     global_state["receiver_address"] = receiver_address
     global_state["gas_price"] = gas_price
     global_state["origin"] = origin
@@ -534,6 +556,7 @@ def get_start_block_to_func_sig():
             start_block_to_func_sig[pc] = func_sig
         else:
             state = 0
+    print("start_block_to_func_sig = ", start_block_to_func_sig)
     return start_block_to_func_sig
 
 def full_sym_exec():
@@ -583,9 +606,10 @@ def sym_exec_block(params, block, pre_block, depth, func_call, current_func_name
             pattern = r'(\w[\w\d_]*)\((.*)\)$'
             match = re.match(pattern, current_func_name)
             if match:
-                current_func_name =  list(match.groups())[0]
+                current_func_name = list(match.groups())[0]
 
     current_edge = Edge(pre_block, block)
+    # count edge's visit time
     if current_edge in visited_edges:
         updated_count_number = visited_edges[current_edge] + 1
         visited_edges.update({current_edge: updated_count_number})
@@ -609,6 +633,7 @@ def sym_exec_block(params, block, pre_block, depth, func_call, current_func_name
         return ["ERROR"]
 
     for instr in block_ins:
+        log.info("block=%d,instr=%s,stack=%s,current_func_name=%s", block, str(instr), str(params.stack), str(current_func_name))
         sym_exec_ins(params, block, instr, func_call, current_func_name)
 
     # Mark that this basic block in the visited blocks
@@ -671,6 +696,7 @@ def sym_exec_block(params, block, pre_block, depth, func_call, current_func_name
 
         log.debug("Branch expression: " + str(branch_expression))
 
+        # TODO: solver usage
         solver.push()  # SET A BOUNDARY FOR SOLVER
         solver.add(branch_expression)
 
@@ -678,7 +704,7 @@ def sym_exec_block(params, block, pre_block, depth, func_call, current_func_name
             if solver.check() == unsat:
                 log.debug("INFEASIBLE PATH DETECTED")
             else:
-                left_branch = vertices[block].get_jump_target()
+                left_branch = vertices[block].get_jump_target()     # JUMPI(true, _)
                 new_params = params.copy()
                 new_params.global_state["pc"] = left_branch
                 new_params.path_conditions_and_vars["path_condition"].append(branch_expression)
@@ -791,10 +817,10 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             second = stack.pop(0)
             # Type conversion is needed when they are mismatched
             if isReal(first) and isSymbolic(second):
-                first = BitVecVal(first, 256)
+                first = BitVecVal(first, WORD_SIZE)
                 computed = first + second
             elif isSymbolic(first) and isReal(second):
-                second = BitVecVal(second, 256)
+                second = BitVecVal(second, WORD_SIZE)
                 computed = first + second
             else:
                 # both are real and we need to manually modulus with 2 ** 256
@@ -884,7 +910,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     computed = first / second
             else:
                 first = to_symbolic(first)
-                second = to_symbolic(second)
+                second = to_symbolic(second, WORD_SIZE)
                 solver.push()
                 solver.add( Not (second == 0) )
                 if check_sat(solver) == unsat:
@@ -1320,10 +1346,19 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                 if position in sha3_list:
                     stack.insert(0, sha3_list[position])
                 else:
-                    new_var_name = gen.gen_arbitrary_var()
-                    new_var = BitVec(new_var_name, 256)
-                    sha3_list[position] = new_var
-                    stack.insert(0, new_var)
+                    if not global_params.CHAION:
+                        new_var_name = gen.gen_arbitrary_var()
+                        new_var = BitVec(new_var_name, 256)
+                        sha3_list[position] = new_var
+                        stack.insert(0, new_var)
+                    else:
+                        new_var_name = gen.gen_arbitrary_var()
+                        sha3_high = BitVec(new_var_name, 128)
+                        new_var_name = gen.gen_arbitrary_var()
+                        sha3_low = BitVec(new_var_name, 128)
+                        sha3_list[position] = [sha3_high, sha3_low]
+                        for item in sha3_list[position]:
+                            stack.insert(0, item)
             else:
                 # push into the execution a fresh symbolic variable
                 new_var_name = gen.gen_arbitrary_var()
@@ -1362,7 +1397,11 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
     elif opcode == "CALLER":  # get caller address
         # that is directly responsible for this execution
         global_state["pc"] = global_state["pc"] + 1
-        stack.insert(0, global_state["sender_address"])
+        if not global_params.CHAION:
+            stack.insert(0, global_state["sender_address"])
+        else:
+            stack.insert(0, global_state["sender_addr_high"])
+            stack.insert(0, global_state["sender_addr_low"])
     elif opcode == "ORIGIN":  # get execution origination address
         global_state["pc"] = global_state["pc"] + 1
         stack.insert(0, global_state["origin"])
@@ -1389,7 +1428,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             if new_var_name in path_conditions_and_vars:
                 new_var = path_conditions_and_vars[new_var_name]
             else:
-                new_var = BitVec(new_var_name, 256)
+                new_var = BitVec(new_var_name, WORD_SIZE)
                 path_conditions_and_vars[new_var_name] = new_var
             stack.insert(0, new_var)
         else:
@@ -1731,7 +1770,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     if new_var_name in path_conditions_and_vars:
                         new_var = path_conditions_and_vars[new_var_name]
                     else:
-                        new_var = BitVec(new_var_name, 256)
+                        new_var = BitVec(new_var_name, WORD_SIZE)
                         path_conditions_and_vars[new_var_name] = new_var
                     stack.insert(0, new_var)
                     if isReal(position):
@@ -1786,6 +1825,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     branch_expression = True
             else:
                 branch_expression = (flag != 0)
+            log.debug("branch_expression = %s, flag = %s" %(branch_expression, flag))
             vertices[block].set_branch_expression(branch_expression)
             if target_address not in edges[block]:
                 edges[block].append(target_address)
@@ -1827,11 +1867,14 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
     elif opcode.startswith("DUP", 0):
         global_state["pc"] = global_state["pc"] + 1
         position = int(opcode[3:], 10) - 1
+        log.debug("DUP: stack len = %d" %(len(stack)))
         if len(stack) > position:
             duplicate = stack[position]
             stack.insert(0, duplicate)
         else:
-            raise ValueError('STACK underflow')
+            print("chaion: stack underflow, add default = 0")
+            stack.insert(0, 0)
+            #raise ValueError('STACK underflow')
 
     #
     #  90s: Swap Operations
@@ -1880,7 +1923,11 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     calls_affect_state[call_pc] = False
             global_state["pc"] = global_state["pc"] + 1
             outgas = stack.pop(0)
-            recipient = stack.pop(0)
+            if not global_params.CHAIN:
+                recipient = stack.pop(0)
+            else:
+                recipient_low = stack.pop(0)
+                recipient_high = stack.pop(0)
             transfer_amount = stack.pop(0)
             start_data_input = stack.pop(0)
             size_data_input = stack.pop(0)
@@ -2083,13 +2130,10 @@ def detect_time_dependency():
     log.info('\t  Timestamp Dependency: \t\t %s', time_dependency.is_vulnerable())
 
     if global_params.REPORT_MODE:
-        file_name = g_disasm_file.split("/")[len(g_disasm_file.split("/"))-1].split(".")[0]
-        report_file = file_name + '.report'
-        with open(report_file, 'w') as rfile:
-            if is_dependant:
-                rfile.write("yes\n")
-            else:
-                rfile.write("no\n")
+        if is_dependant:
+            rfile.write("Timestamp Dependency: yes\n")
+        else:
+            rfile.write("Timestamp Dependency: no\n")
 
 
 # detect if two paths send money to different people
@@ -2137,14 +2181,14 @@ def detect_money_concurrency():
     # if PRINT_MODE: print "All false positive cases: ", false_positive
     log.debug("Concurrency in paths: ")
     if global_params.REPORT_MODE:
-        rfile.write("number of path: " + str(n) + "\n")
+        rfile.write("========== Concurrency ===========\n[number of path]: " + str(n) + "\n")
         # number of FP detected
-        rfile.write(str(len(false_positive)) + "\n")
-        rfile.write(str(false_positive) + "\n")
+        rfile.write("Number of FP detected: " + str(len(false_positive)) + "\n")
+        rfile.write("FP info: " + str(false_positive) + "\n")
         # number of total races
-        rfile.write(str(len(concurrency_paths)) + "\n")
+        rfile.write("Number of Total Races: " + str(len(concurrency_paths)) + "\n")
         # all the races
-        rfile.write(str(concurrency_paths) + "\n")
+        rfile.write("All Races' info: " + str(concurrency_paths) + "\n")
 
 def detect_parity_multisig_bug_2():
     global g_src_map
@@ -2186,6 +2230,7 @@ def check_callstack_attack(disasm):
                     pcs.append(pc)
             except IndexError:
                 pcs.append(pc)
+    print("callstack attack = ", str(pcs))
     return pcs
 
 
@@ -2198,8 +2243,10 @@ def detect_callstack_attack():
     disasm_data = open(g_disasm_file).read()
     instr_pattern = r"([\d]+) ([A-Z]+)([\d]+)?(?: => 0x)?(\S+)?"
     instr = re.findall(instr_pattern, disasm_data)
+    log.debug("check instr = %s", str(instr))
     pcs = check_callstack_attack(instr)
 
+    print("calls_affect_state = ", str(calls_affect_state))
     callstack = CallStack(g_src_map, pcs, calls_affect_state)
 
     if g_src_map:
@@ -2280,14 +2327,14 @@ def detect_vulnerabilities():
         detect_callstack_attack()
 
         if global_params.REPORT_MODE:
-            rfile.write(str(total_no_of_paths) + "\n")
+            rfile.write("Total Number of Paths:" + str(total_no_of_paths) + "\n")
 
         detect_money_concurrency()
         detect_time_dependency()
 
         stop = time.time()
         if global_params.REPORT_MODE:
-            rfile.write(str(stop-begin))
+            rfile.write("Time Cost: " + str(stop-begin) + 's')
             rfile.close()
 
         log.debug("Results for Reentrancy Bug: " + str(reentrancy_all_paths))
@@ -2444,6 +2491,7 @@ def run(disasm_file=None, source_file=None, source_map=None):
     global g_source_file
     global g_src_map
     global results
+    global begin
 
     g_disasm_file = disasm_file
     g_source_file = source_file

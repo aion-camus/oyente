@@ -30,9 +30,9 @@ def isAllReal(*args):
             return False
     return True
 
-def to_symbolic(number):
+def to_symbolic(number, BIT_WIDTH=256):
     if isReal(number):
-        return BitVecVal(number, 256)
+        return BitVecVal(number, BIT_WIDTH)
     return number
 
 def to_unsigned(number):
