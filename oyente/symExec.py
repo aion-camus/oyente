@@ -23,10 +23,14 @@ from test_evm.global_test_params import (TIME_OUT, UNKNOWN_INSTRUCTION,
 from vulnerability import CallStack, TimeDependency, MoneyConcurrency, Reentrancy, AssertionFailure, ParityMultisigBug2, IntegerUnderflow, IntegerOverflow
 import global_params
 
+sys.path.append(os.path.join(os.getcwd(), "symExec"))
+
 log = logging.getLogger(__name__)
 
 UNSIGNED_BOUND_NUMBER = 2**256 - 1
 CONSTANT_ONES_159 = BitVecVal((1 << 160) - 1, 256)
+CONSTANT_ONES_128 = BitVecVal((1 << 128) - 1, 128)
+
 if global_params.CHAION:
     WORD_SIZE = 128
 else:
@@ -228,7 +232,6 @@ def build_cfg_and_analyze():
         tokens = tokenize.generate_tokens(disasm_file.readline)
         collect_vertices(tokens)
         #log.info(g_src_map.instr_positions)
-        print("instructions = ", str(instructions))
         construct_bb()
         construct_static_edges()
         full_sym_exec()  # jump targets are constructed on the fly
@@ -388,10 +391,7 @@ def construct_bb():
     global vertices
     global edges
     sorted_addresses = sorted(instructions.keys())
-    print("sorted address: ", sorted_addresses)
     size = len(sorted_addresses)
-    print("end_ins_dict = ", end_ins_dict)
-    print("jump_type = ", jump_type)
     for key in end_ins_dict:
         end_address = end_ins_dict[key]
         block = BasicBlock(key, end_address)
@@ -402,7 +402,7 @@ def construct_bb():
         while i < size and sorted_addresses[i] <= end_address:
             block.add_instruction(instructions[sorted_addresses[i]])
             i += 1
-        log.info("block: " + str(key) + ":instructions = " + str(block.get_instructions()));
+        log.debug("block: " + str(key) + ":instructions = " + str(block.get_instructions()));
         block.set_block_type(jump_type[key])
         vertices[key] = block
         edges[key] = []
@@ -416,7 +416,6 @@ def add_falls_to():
     global vertices
     global edges
     key_list = sorted(jump_type.keys())
-    print("key_list = ", key_list)
     length = len(key_list)
     for i, key in enumerate(key_list):
         if jump_type[key] != "terminal" and jump_type[key] != "unconditional" and i+1 < length:
@@ -463,6 +462,9 @@ def get_init_global_state(path_conditions_and_vars):
             sender_addr_low = BitVec("Is-low", 128)
             recv_addr_high = BitVec("Ia-high", 128)
             recv_addr_low = BitVec("Is-low", 128)
+            path_conditions_and_vars["Is-high"]  = sender_addr_high;
+            path_conditions_and_vars["Is-low"]  = sender_addr_low;
+
         receiver_address = BitVec("Ia", 256)
         deposited_value = BitVec("Iv", WORD_SIZE)
         init_is = BitVec("init_Is", WORD_SIZE)
@@ -556,7 +558,6 @@ def get_start_block_to_func_sig():
             start_block_to_func_sig[pc] = func_sig
         else:
             state = 0
-    print("start_block_to_func_sig = ", start_block_to_func_sig)
     return start_block_to_func_sig
 
 def full_sym_exec():
@@ -633,7 +634,7 @@ def sym_exec_block(params, block, pre_block, depth, func_call, current_func_name
         return ["ERROR"]
 
     for instr in block_ins:
-        log.info("block=%d,instr=%s,stack=%s,current_func_name=%s", block, str(instr), str(params.stack), str(current_func_name))
+        log.debug("block=%d,instr=%s,stack=%s,current_func_name=%s", block, str(instr), str(params.stack), str(current_func_name))
         sym_exec_ins(params, block, instr, func_call, current_func_name)
 
     # Mark that this basic block in the visited blocks
@@ -1932,11 +1933,13 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                     calls_affect_state[call_pc] = False
             global_state["pc"] = global_state["pc"] + 1
             outgas = stack.pop(0)
-            if not global_params.CHAIN:
-                recipient = stack.pop(0)
-            else:
+
+            if global_params.CHAION:
                 recipient_low = stack.pop(0)
                 recipient_high = stack.pop(0)
+            else:
+                recipient = stack.pop(0)
+
             transfer_amount = stack.pop(0)
             start_data_input = stack.pop(0)
             size_data_input = stack.pop(0)
@@ -1945,7 +1948,6 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             # in the paper, it is shaky when the size of data output is
             # min of stack[6] and the | o |
 
-            print("typeof(tx_amount) = ", type(transfer_amount))
             if isReal(transfer_amount):
                 if transfer_amount == 0:
                     stack.insert(0, 1)   # x = 0
@@ -1971,11 +1973,26 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
                 analysis["time_dependency_bug"][last_idx] = global_state["pc"] - 1
                 new_balance_ia = (balance_ia - transfer_amount)
                 global_state["balance"]["Ia"] = new_balance_ia
-                address_is = path_conditions_and_vars["Is"]
-                address_is = (address_is & CONSTANT_ONES_159)
-                boolean_expression = (recipient != address_is)
-                solver.push()
-                solver.add(boolean_expression)
+                if global_params.CHAION:
+                    # address_is = path_conditions_and_vars["Is"]
+                    address_is_high = path_conditions_and_vars["Is-high"]
+                    address_is_low = path_conditions_and_vars["Is-low"]
+                    address_is_high = (address_is_high & CONSTANT_ONES_128)
+                    address_is_low = (address_is_low & CONSTANT_ONES_128)
+
+                    boolean_expression_high = (recipient_high != address_is_high)
+                    boolean_expression_low = (recipient_low != address_is_low)
+
+                    solver.push()
+                    solver.add(boolean_expression_high)
+                    solver.add(boolean_expression_low)
+                else:
+                    address_is = path_conditions_and_vars["Is"]
+                    address_is = (address_is & CONSTANT_ONES_159)
+                    boolean_expression = (recipient != address_is)
+                    solver.push()
+                    solver.add(boolean_expression)
+
                 if check_sat(solver) == unsat:
                     solver.pop()
                     new_balance_is = (global_state["balance"]["Is"] + transfer_amount)
@@ -2240,7 +2257,6 @@ def check_callstack_attack(disasm):
                     pcs.append(pc)
             except IndexError:
                 pcs.append(pc)
-    print("callstack attack = ", str(pcs))
     return pcs
 
 
@@ -2253,10 +2269,8 @@ def detect_callstack_attack():
     disasm_data = open(g_disasm_file).read()
     instr_pattern = r"([\d]+) ([A-Z]+)([\d]+)?(?: => 0x)?(\S+)?"
     instr = re.findall(instr_pattern, disasm_data)
-    log.debug("check instr = %s", str(instr))
     pcs = check_callstack_attack(instr)
 
-    print("calls_affect_state = ", str(calls_affect_state))
     callstack = CallStack(g_src_map, pcs, calls_affect_state)
 
     if g_src_map:

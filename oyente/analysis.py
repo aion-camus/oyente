@@ -39,7 +39,7 @@ def display_analysis(analysis):
 def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     path_condition = path_conditions_and_vars["path_condition"]
     new_path_condition = []
-    log.info("path_condition = %s" %path_condition)
+    log.debug("path_condition = %s" %path_condition)
     for expr in path_condition:
         if not is_expr(expr):
             continue
@@ -61,7 +61,7 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     if global_params.DEBUG_MODE:
         log.info("=>>>>>> New PC: " + str(new_path_condition))
 
-    log.info("new_path_condition = " + str(new_path_condition))
+    log.debug("new_path_condition = " + str(new_path_condition))
     solver = Solver()
     solver.set("timeout", global_params.TIMEOUT)
     solver.add(path_condition)
@@ -73,7 +73,6 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     if not global_params.CHAION:
         solver.add(stack[2] > BitVec('Iv', 256))
     else:
-        print("typeof item = ", type(stack[3]))
         solver.add(stack[3] > BitVec('Iv', 256))
     # if it is not feasible to re-execute the call, its not a bug
     ret_val = not (solver.check() == unsat)
