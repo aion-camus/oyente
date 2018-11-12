@@ -16,7 +16,7 @@ class HomeController < ApplicationController
     else
       FileUtils::mkdir_p "tmp/contracts"
       current_filename = oyente_params[:current_file].split("/")[-1]
-      dir_path = Dir::Tmpname.make_tmpname "tmp/contracts/#{current_filename}", nil
+      dir_path = "tmp/contracts/#{current_filename}"  #Dir::Tmpname.make_tmpname "tmp/contracts/#{current_filename}", nil
       sources = eval(oyente_params[:sources])
       structure_files sources, dir_path
       file = File.open("#{dir_path}/#{oyente_params[:current_file]}", "r")
@@ -86,7 +86,8 @@ class HomeController < ApplicationController
   end
 
   def oyente_cmd filepath, options
-    return `python #{ENV['OYENTE']}/oyente.py -s #{filepath} -w#{options}`
+    #return `python #{ENV['OYENTE']}/oyente.py -s #{filepath} -w#{options}`
+    return `python ../oyente/oyente.py -s #{filepath} -w#{options}`
   end
 
   def bytecode_exists?
@@ -114,6 +115,7 @@ class HomeController < ApplicationController
         opts += " --#{opt} #{val}"
       end
     end
+    opts += " --chaion"
     return opts
   end
 

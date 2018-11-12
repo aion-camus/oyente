@@ -461,9 +461,11 @@ def get_init_global_state(path_conditions_and_vars):
             sender_addr_high = BitVec("Is-high", 128)
             sender_addr_low = BitVec("Is-low", 128)
             recv_addr_high = BitVec("Ia-high", 128)
-            recv_addr_low = BitVec("Is-low", 128)
+            recv_addr_low = BitVec("Ia-low", 128)
             path_conditions_and_vars["Is-high"]  = sender_addr_high;
             path_conditions_and_vars["Is-low"]  = sender_addr_low;
+            path_conditions_and_vars["Ia-high"] = recv_addr_high;
+            path_conditions_and_vars["Is-low"] = recv_addr_low;
 
         receiver_address = BitVec("Ia", 256)
         deposited_value = BitVec("Iv", WORD_SIZE)
@@ -493,7 +495,12 @@ def get_init_global_state(path_conditions_and_vars):
 
     if not origin:
         new_var_name = gen.gen_origin_var()
-        origin = BitVec(new_var_name, 256)
+        if not global_params.CHAION:
+            origin = BitVec(new_var_name, 256)
+        else:
+            origin_high = BitVec(new_var_name, 128)
+            new_var_name = gen.gen_origin_var()
+            origin_low = BitVec(new_var_name, 128)
         path_conditions_and_vars[new_var_name] = origin
 
     if not currentCoinbase:
@@ -531,6 +538,8 @@ def get_init_global_state(path_conditions_and_vars):
         global_state["sender_addr_low"] = sender_addr_low
         global_state["recv_addr_high"] = recv_addr_high
         global_state["recv_addr_low"] = recv_addr_low
+        global_state["origin_high"] = origin_high
+        global_state["origin_low"] = origin_low
     global_state["receiver_address"] = receiver_address
     global_state["gas_price"] = gas_price
     global_state["origin"] = origin
@@ -1381,26 +1390,47 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
     #
     elif opcode == "ADDRESS":  # get address of currently executing account
         global_state["pc"] = global_state["pc"] + 1
-        stack.insert(0, path_conditions_and_vars["Ia"])
+        if global_params.CHAION:
+            stack.insert(0, path_conditions_and_vars["Ia-high"])
+            stack.insert(0, path_conditions_and_vars["Ia-low"])
+        else:
+            stack.insert(0, path_conditions_and_vars["Ia"])
     elif opcode == "BALANCE":
         if len(stack) > 0:
             global_state["pc"] = global_state["pc"] + 1
-            address = stack.pop(0)
-            if isReal(address) and global_params.USE_GLOBAL_BLOCKCHAIN:
-                new_var = data_source.getBalance(address)
+            if not global_params.CHAION:
+                address = stack.pop(0)
+                if isReal(address) and global_params.USE_GLOBAL_BLOCKCHAIN:
+                    new_var = data_source.getBalance(address)
+                else:
+                    new_var_name = gen.gen_balance_var()
+                    if new_var_name in path_conditions_and_vars:
+                        new_var = path_conditions_and_vars[new_var_name]
+                    else:
+                        new_var = BitVec(new_var_name, 256)
+                        path_conditions_and_vars[new_var_name] = new_var
+                if isReal(address):
+                    hashed_address = "concrete_address_" + str(address)
+                else:
+                    hashed_address = str(address)
+                global_state["balance"][hashed_address] = new_var
+                stack.insert(0, new_var)
             else:
+                address_l = stack.pop(0)
+                address_h = stack.pop(0)
+                #TODO: only static analysis supported
                 new_var_name = gen.gen_balance_var()
                 if new_var_name in path_conditions_and_vars:
                     new_var = path_conditions_and_vars[new_var_name]
                 else:
-                    new_var = BitVec(new_var_name, 256)
+                    new_var = BitVec(new_var_name, 128)
                     path_conditions_and_vars[new_var_name] = new_var
-            if isReal(address):
-                hashed_address = "concrete_address_" + str(address)
-            else:
-                hashed_address = str(address)
-            global_state["balance"][hashed_address] = new_var
-            stack.insert(0, new_var)
+                if isReal(address_h) and isReal(address_l):
+                    hashed_address = "concrete_address_" + str(address_h) + str(address_l)
+                else:
+                    hashed_address = str(address_h) + '-' + str(address_l)
+                global_state["balance"][hashed_address] = new_var
+                stack.insert(0, new_var)
         else:
             raise ValueError('STACK underflow')
     elif opcode == "CALLER":  # get caller address
@@ -1413,7 +1443,11 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             stack.insert(0, global_state["sender_addr_low"])
     elif opcode == "ORIGIN":  # get execution origination address
         global_state["pc"] = global_state["pc"] + 1
-        stack.insert(0, global_state["origin"])
+        if not global_params.CHAION:
+            stack.insert(0, global_state["origin"])
+        else:
+            stack.insert(0, global_state["origin_high"])
+            stack.insert(0, global_state["origin_low"])
     elif opcode == "CALLVALUE":  # get value of this transaction
         global_state["pc"] = global_state["pc"] + 1
         stack.insert(0, global_state["value"])
@@ -1882,7 +1916,7 @@ def sym_exec_ins(params, block, instr, func_call, current_func_name):
             duplicate = stack[position]
             stack.insert(0, duplicate)
         else:
-            print("chaion: stack underflow, add default = 0")
+            log.debug("chaion: stack underflow, add default = 0")
             stack.insert(0, 0)
             #raise ValueError('STACK underflow')
 
