@@ -465,7 +465,7 @@ def get_init_global_state(path_conditions_and_vars):
             path_conditions_and_vars["Is-high"]  = sender_addr_high;
             path_conditions_and_vars["Is-low"]  = sender_addr_low;
             path_conditions_and_vars["Ia-high"] = recv_addr_high;
-            path_conditions_and_vars["Is-low"] = recv_addr_low;
+            path_conditions_and_vars["Ia-low"] = recv_addr_low;
 
         receiver_address = BitVec("Ia", 256)
         deposited_value = BitVec("Iv", WORD_SIZE)
