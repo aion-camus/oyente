@@ -73,7 +73,7 @@ def check_reentrancy_bug(path_conditions_and_vars, stack, global_state):
     if not global_params.CHAION:
         solver.add(stack[2] > BitVec('Iv', 256))
     else:
-        solver.add(stack[3] > BitVec('Iv', 256))
+        solver.add(stack[3] > BitVec('Iv', 128))
     # if it is not feasible to re-execute the call, its not a bug
     ret_val = not (solver.check() == unsat)
     if global_params.DEBUG_MODE:
